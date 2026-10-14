@@ -67,7 +67,7 @@ beat)
     wait_postgres
     export RSSANT_ROLE=api
     echo "[entrypoint] starting celery beat"
-    exec celery -A rssant_ai beat -l info --schedule /app/data/celerybeat-schedule
+    exec celery -A rssant_ai.celery beat -l info --schedule /app/data/celerybeat-schedule
     ;;
 migrate)
     wait_postgres

@@ -214,7 +214,7 @@ docker compose ps                       # 查看服务状态
 docker compose logs -f worker           # 看 AI 任务与 RSS 同步日志
 docker compose logs -f beat             # 看定时调度
 docker compose exec web python manage.py migrate
-docker compose exec worker celery -A rssant_ai inspect active   # 查看运行中的任务
+docker compose exec worker celery -A rssant_ai.celery inspect active   # 查看运行中的任务
 
 # 手动生成一次今日简报（同步执行，便于演示）
 curl -X POST -u admin:admin123456 \

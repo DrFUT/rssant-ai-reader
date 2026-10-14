@@ -1,0 +1,13 @@
+# 统一使用 LF 换行符。
+# 尤其重要: docker/entrypoint.sh 一旦变成 CRLF, Linux 容器里
+# 会因为 "#!/usr/bin/env bash\r" 直接报 bad interpreter 启动失败。
+* text=auto eol=lf
+
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
+*.yml text eol=lf
+*.py text eol=lf
+
+# 测试数据里含大量原始抓取样本, 不做换行转换
+tests/** -text

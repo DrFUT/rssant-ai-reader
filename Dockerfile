@@ -47,7 +47,13 @@ COPY --from=build /app/.venv /app/.venv
 
 COPY . .
 
-RUN mkdir -p /app/data /app/logs && chmod +x /app/docker/entrypoint.sh
+# Windows 上 clone 过来会丢掉可执行位, 这里统一补一次
+RUN mkdir -p /app/data /app/logs && chmod +x \
+    /app/docker/entrypoint.sh \
+    /app/manage.py \
+    /app/runserver.py \
+    /app/run-scheduler.py \
+    /app/run-asyncapi.py
 
 # 静态文件收集: 本项目的阅读器页面是内联资源, 不依赖 manifest,
 # 即使这里失败也不应该阻断镜像构建
