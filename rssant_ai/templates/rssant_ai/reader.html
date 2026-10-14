@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 智能信息流阅读器</title>
+<style>
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel2: #1e222b;
+  --border: #2a2f3a;
+  --text: #e6e9ef;
+  --muted: #8b93a7;
+  --accent: #4f8cff;
+  --accent2: #22c55e;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 14px; line-height: 1.6;
+}
+a { color: inherit; text-decoration: none; }
+header {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(15,17,21,.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.logo { font-size: 17px; font-weight: 700; letter-spacing: .3px; }
+.logo span { color: var(--accent); }
+.badge {
+  font-size: 12px; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.badge.on { color: var(--accent2); border-color: rgba(34,197,94,.45); }
+.badge.off { color: var(--warn); border-color: rgba(245,158,11,.45); }
+.spacer { flex: 1; }
+.tabs { display: flex; gap: 4px; }
+.tab {
+  padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  color: var(--muted); border: 1px solid transparent;
+}
+.tab.active { background: var(--panel2); color: var(--text); border-color: var(--border); }
+main { max-width: 940px; margin: 0 auto; padding: 20px; }
+.toolbar {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  margin-bottom: 16px;
+}
+input[type=text], input[type=number], select, textarea {
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; font-size: 13px; outline: none;
+}
+input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accent); }
+button {
+  background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+  padding: 7px 14px; font-size: 13px; cursor: pointer;
+}
+button.ghost { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+button:disabled { opacity: .5; cursor: default; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  padding: 4px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+}
+.chip.active { background: rgba(79,140,255,.16); color: var(--accent); border-color: rgba(79,140,255,.5); }
+.card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; margin-bottom: 12px;
+}
+.card:hover { border-color: #39404f; }
+.card h3 { margin: 0 0 8px; font-size: 16px; line-height: 1.45; }
+.card h3 a:hover { color: var(--accent); }
+.meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 6px;
+  background: var(--panel2); color: var(--muted);
+}
+.tag.topic { background: rgba(79,140,255,.14); color: var(--accent); }
+.score {
+  font-size: 11px; padding: 2px 8px; border-radius: 6px;
+  background: rgba(34,197,94,.14); color: var(--accent2);
+}
+.score.low { background: rgba(139,147,167,.14); color: var(--muted); }
+.score.hot { background: rgba(245,158,11,.16); color: var(--warn); }
+.summary { color: #c9cfdc; margin: 0 0 10px; }
+.points { margin: 0 0 10px; padding-left: 18px; color: var(--muted); }
+.points li { margin-bottom: 2px; }
+.pending { color: var(--muted); font-size: 12px; font-style: italic; }
+.empty { text-align: center; color: var(--muted); padding: 48px 0; }
+.digest-overview {
+  background: linear-gradient(135deg, rgba(79,140,255,.12), rgba(34,197,94,.08));
+  border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px;
+}
+.digest-item { border-left: 3px solid var(--accent); padding-left: 14px; margin-bottom: 18px; }
+.digest-item h4 { margin: 0 0 6px; font-size: 15px; }
+.reason { color: var(--warn); font-size: 12px; }
+.section-title { font-size: 13px; color: var(--muted); margin: 20px 0 8px; }
+.hint { color: var(--muted); font-size: 12px; }
+textarea { width: 100%; min-height: 80px; resize: vertical; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+#toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--panel2); border: 1px solid var(--border);
+  padding: 10px 18px; border-radius: 10px; font-size: 13px;
+  opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 100;
+}
+#toast.show { opacity: 1; }
+.spinner { color: var(--muted); text-align: center; padding: 32px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">AI <span>智能信息流</span> 阅读器</div>
+  <span id="aiBadge" class="badge">检测中…</span>
+  <div class="spacer"></div>
+  <div class="tabs">
+    <div class="tab active" data-tab="feed">信息流</div>
+    <div class="tab" data-tab="digest">每日简报</div>
+    <div class="tab" data-tab="interest">兴趣设置</div>
+  </div>
+  <a class="badge" href="/api/v1/accounts/logout/">退出</a>
+</header>
+
+<main>
+  <section id="tab-feed">
+    <div class="toolbar">
+      <input type="text" id="q" placeholder="搜索标题 / 摘要" style="width:200px">
+      <select id="sort">
+        <option value="time">按时间</option>
+        <option value="score">按 AI 评分</option>
+        <option value="interest">按兴趣匹配</option>
+      </select>
+      <select id="minScore">
+        <option value="0">全部评分</option>
+        <option value="5">评分 ≥ 5</option>
+        <option value="7">评分 ≥ 7</option>
+        <option value="9">评分 ≥ 9</option>
+      </select>
+      <label class="hint"><input type="checkbox" id="onlyInterest"> 只看命中兴趣</label>
+      <button id="btnSearch">筛选</button>
+      <button class="ghost" id="btnRefresh">刷新</button>
+    </div>
+    <div class="chips" id="topicChips"></div>
+    <div id="feedList" style="margin-top:16px"><div class="spinner">加载中…</div></div>
+    <div style="margin-top:16px"><button class="ghost" id="btnMore">加载更多</button></div>
+  </section>
+
+  <section id="tab-digest" style="display:none">
+    <div class="toolbar">
+      <button id="btnDigest">生成今日简报</button>
+      <span class="hint" id="digestHint"></span>
+    </div>
+    <div id="digestBox"><div class="spinner">加载中…</div></div>
+  </section>
+
+  <section id="tab-interest" style="display:none">
+    <div class="card">
+      <div class="section-title">关注关键词（逗号分隔）</div>
+      <textarea id="keywords" placeholder="AI, Python, Rust, 大模型"></textarea>
+      <div class="section-title">关注主题</div>
+      <div class="chips" id="topicPicker"></div>
+      <div class="section-title">命中阈值</div>
+      <div class="row">
+        <input type="number" id="threshold" step="0.5" min="0" value="1" style="width:100px">
+        <label class="hint"><input type="checkbox" id="enableInterest"> 启用兴趣过滤</label>
+      </div>
+      <button id="btnSaveInterest">保存</button>
+      <span class="hint" id="interestHint" style="margin-left:10px"></span>
+    </div>
+    <div class="card">
+      <div class="section-title">说明</div>
+      <p class="hint">
+        兴趣匹配是透明的可解释规则：标题命中权重 3、标签命中权重 2、摘要命中权重 1。
+        没有使用向量检索或推荐模型 —— 在 2 核 2GB 的自托管环境里，
+        可解释的轻量规则比跑不动的复杂算法更实用。
+      </p>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const API = '{{ api_base }}';
+const TOPICS = {{ topics|safe }};
+const state = { tab: 'feed', topic: '', offset: 0, limit: 20, total: 0, stories: [] };
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+function csrf() {
+  const m = document.cookie.match(/csrftoken=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+async function get(url) {
+  const resp = await fetch(url, { credentials: 'same-origin' });
+  if (resp.status === 401 || resp.status === 403) { toast('请先登录'); throw new Error('auth'); }
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+async function post(url, body) {
+  const resp = await fetch(url, {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+    body: JSON.stringify(body || {})
+  });
+  if (resp.status === 401 || resp.status === 403) { toast('请先登录'); throw new Error('auth'); }
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// ---------------- tabs ----------------
+document.querySelectorAll('.tab').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    el.classList.add('active');
+    state.tab = el.dataset.tab;
+    ['feed', 'digest', 'interest'].forEach(t => {
+      document.getElementById('tab-' + t).style.display = (t === state.tab) ? '' : 'none';
+    });
+    if (state.tab === 'digest') loadDigest();
+    if (state.tab === 'interest') loadInterest();
+  });
+});
+
+// ---------------- status ----------------
+async function loadStatus() {
+  try {
+    const s = await get(API + '/status');
+    const badge = document.getElementById('aiBadge');
+    if (s.enabled) {
+      badge.className = 'badge on';
+      badge.textContent = 'AI 已启用 · ' + s.model;
+    } else {
+      badge.className = 'badge off';
+      badge.textContent = 'AI 未配置 · 仅规则分类';
+    }
+    const pending = (s.queue && (s.queue.pending + s.queue.processing)) || 0;
+    if (pending > 0) {
+      badge.textContent += ' · 待处理 ' + pending;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// ---------------- topics ----------------
+async function loadTopics() {
+  try {
+    const data = await get(API + '/topics');
+    const box = document.getElementById('topicChips');
+    box.innerHTML = '<div class="chip active" data-topic="">全部</div>' +
+      data.topics.map(t => '<div class="chip" data-topic="' + esc(t.topic) + '">' +
+        esc(t.topic) + ' <span style="opacity:.6">' + t.count + '</span></div>').join('');
+    box.querySelectorAll('.chip').forEach(c => {
+      c.addEventListener('click', () => {
+        box.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+        c.classList.add('active');
+        state.topic = c.dataset.topic; state.offset = 0;
+        loadFeed(true);
+      });
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ---------------- feed ----------------
+function renderStory(s) {
+  const scoreCls = s.ai_score >= 8 ? 'hot' : (s.ai_score >= 5 ? '' : 'low');
+  const tags = (s.ai_keywords || []).map(k => '<span class="tag">' + esc(k) + '</span>').join('');
+  const points = (s.ai_points || []).length
+    ? '<ul class="points">' + s.ai_points.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>'
+    : '';
+  const summary = s.ai_summary
+    ? '<p class="summary">' + esc(s.ai_summary) + '</p>' +
+      (s.ai_status === 'done' ? '' : '<p class="pending">（此摘要为降级生成，AI 未配置）</p>')
+    : '<p class="pending">AI 摘要生成中…（异步任务处理，无需等待）</p>';
+  const interest = s.interest_score > 0
+    ? ' <span class="tag">兴趣 ' + s.interest_score + '</span>' : '';
+  return '<div class="card">' +
+    '<h3><a href="' + esc(s.link) + '" target="_blank" rel="noopener">' + esc(s.title) + '</a></h3>' +
+    '<div class="meta">' +
+      '<span class="tag topic">' + esc(s.topic) + '</span>' +
+      '<span class="score ' + scoreCls + '">AI ' + s.ai_score + '/10</span>' +
+      interest + tags +
+      '<span class="hint">' + fmtDate(s.dt_created) + '</span>' +
+    '</div>' + summary + points +
+    '</div>';
+}
+
+async function loadFeed(reset) {
+  const box = document.getElementById('feedList');
+  if (reset) { state.offset = 0; state.stories = []; box.innerHTML = '<div class="spinner">加载中…</div>'; }
+  const params = new URLSearchParams({
+    offset: state.offset, limit: state.limit,
+    sort: document.getElementById('sort').value,
+    min_score: document.getElementById('minScore').value
+  });
+  if (state.topic) params.set('topic', state.topic);
+  const q = document.getElementById('q').value.trim();
+  if (q) params.set('q', q);
+  if (document.getElementById('onlyInterest').checked) params.set('interest', '1');
+  try {
+    const data = await get(API + '/stories?' + params.toString());
+    state.total = data.total;
+    state.stories = state.stories.concat(data.stories);
+    box.innerHTML = state.stories.length
+      ? state.stories.map(renderStory).join('')
+      : '<div class="empty">还没有已处理的文章。<br>先去订阅几个 RSS 源，AI 摘要会在后台自动生成。</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="empty">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+// ---------------- digest ----------------
+async function loadDigest() {
+  const box = document.getElementById('digestBox');
+  box.innerHTML = '<div class="spinner">加载中…</div>';
+  try {
+    const d = await get(API + '/digest/latest');
+    let html = '<div class="digest-overview"><b>' + esc(d.date) + ' 今日概览</b><br>' + esc(d.overview || '（无）') + '</div>';
+    html += (d.items || []).map((it, i) =>
+      '<div class="digest-item">' +
+      '<h4>' + (i + 1) + '. <a href="' + esc(it.link || '#') + '" target="_blank" rel="noopener">' + esc(it.title) + '</a></h4>' +
+      '<p class="summary">' + esc(it.digest) + '</p>' +
+      '<div class="reason">推荐原因：' + esc(it.reason) + ' · 推荐指数 ' + it.score + '/10</div>' +
+      '</div>').join('');
+    if (!(d.items || []).length) html += '<div class="empty">今日暂无精选。</div>';
+    html += '<p class="hint">候选文章 ' + d.story_count + ' 篇 · 模型 ' + esc(d.model) + '</p>';
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<div class="empty">还没有生成简报。点击上方按钮生成，或等待每日定时任务。</div>';
+  }
+}
+
+// ---------------- interest ----------------
+async function loadInterest() {
+  const picker = document.getElementById('topicPicker');
+  picker.innerHTML = TOPICS.map(t =>
+    '<div class="chip" data-topic="' + esc(t) + '">' + esc(t) + '</div>').join('');
+  try {
+    const d = await get(API + '/interest');
+    document.getElementById('keywords').value = d.keywords || '';
+    document.getElementById('threshold').value = d.threshold;
+    document.getElementById('enableInterest').checked = !!d.enable;
+    const picked = d.topics || [];
+    picker.querySelectorAll('.chip').forEach(c => {
+      if (picked.indexOf(c.dataset.topic) >= 0) c.classList.add('active');
+      c.addEventListener('click', () => c.classList.toggle('active'));
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ---------------- events ----------------
+document.getElementById('btnSearch').addEventListener('click', () => loadFeed(true));
+document.getElementById('btnRefresh').addEventListener('click', () => loadFeed(true));
+document.getElementById('btnMore').addEventListener('click', () => {
+  state.offset += state.limit; loadFeed(false);
+});
+document.getElementById('btnDigest').addEventListener('click', async () => {
+  const btn = document.getElementById('btnDigest');
+  const hint = document.getElementById('digestHint');
+  btn.disabled = true; hint.textContent = '已提交异步任务，处理中…';
+  try {
+    await post(API + '/digest/generate', { async: 1 });
+    toast('简报生成任务已提交');
+    setTimeout(() => { hint.textContent = ''; loadDigest(); }, 8000);
+  } catch (e) {
+    hint.textContent = '提交失败：' + e.message;
+  } finally { btn.disabled = false; }
+});
+document.getElementById('btnSaveInterest').addEventListener('click', async () => {
+  const topics = Array.from(document.querySelectorAll('#topicPicker .chip.active'))
+    .map(c => c.dataset.topic);
+  const body = {
+    keywords: document.getElementById('keywords').value,
+    topics: topics,
+    threshold: parseFloat(document.getElementById('threshold').value || '1'),
+    enable: document.getElementById('enableInterest').checked
+  };
+  try {
+    await post(API + '/interest', body);
+    document.getElementById('interestHint').textContent = '已保存';
+    toast('兴趣配置已保存');
+  } catch (e) {
+    document.getElementById('interestHint').textContent = '保存失败：' + e.message;
+  }
+});
+
+loadStatus();
+loadTopics();
+loadFeed(true);
+</script>
+</body>
+</html>

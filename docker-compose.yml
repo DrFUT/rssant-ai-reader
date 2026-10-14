@@ -1,0 +1,171 @@
+# ===========================================================================
+# AI 智能信息流阅读器 —— Docker Compose 编排
+#
+# 服务(共 5 个):
+#   database  PostgreSQL, 独立容器, 低配参数调优
+#   redis     Celery 的消息 broker
+#   web       Django: REST API + 阅读器页面(同时负责执行数据库迁移)
+#   worker    后台任务容器: Celery AI Worker + RSS 同步调度器 + RSS 抓取执行器
+#   beat      Celery Beat: 每日简报 / 摘要巡查的定时调度
+#
+# 2 核 2GB 优化要点:
+#   * Celery 固定单进程单并发(--concurrency=1), 预取 1, 任务带硬超时
+#   * 每个服务都有内存上限, Redis 限制 96MB 并禁用持久化
+#   * PostgreSQL 关闭不必要的内存开销(shared_buffers 128MB)
+#   * RSS 同步与 AI 任务共用同一个后台容器, 减少常驻进程数量
+# ===========================================================================
+
+x-rssant-env: &rssant-env
+  # ---- 基础 ----
+  RSSANT_DEBUG: "0"
+  RSSANT_SECRET_KEY: ${RSSANT_SECRET_KEY:-rssant-ai-dev-secret-please-change}
+  RSSANT_ROOT_URL: ${RSSANT_ROOT_URL:-http://localhost:6789}
+  RSSANT_LOG_LEVEL: ${RSSANT_LOG_LEVEL:-INFO}
+  RSSANT_CHECK_FEED_MINUTES: ${RSSANT_CHECK_FEED_MINUTES:-30}
+  RSSANT_NUM_THREADS: "20"
+  # 上游的图片代理服务(asyncapi)本部署未启用, 图片直接走原站
+  RSSANT_IMAGE_PROXY_ENABLE: "0"
+  # ---- 数据库 ----
+  RSSANT_PG_HOST: database
+  RSSANT_PG_PORT: "5432"
+  RSSANT_PG_DB: ${RSSANT_PG_DB:-rssant}
+  RSSANT_PG_USER: ${RSSANT_PG_USER:-rssant}
+  RSSANT_PG_PASSWORD: ${RSSANT_PG_PASSWORD:-rssant}
+  # ---- 服务间调用 ----
+  RSSANT_WORKER_URL: http://worker:6793
+  RSSANT_HARBOR_URL: http://web:6789
+  RSSANT_BIND_ADDRESS: 0.0.0.0:6789
+  # ---- Celery ----
+  RSSANT_CELERY_BROKER_URL: redis://redis:6379/0
+  RSSANT_CELERY_RESULT_BACKEND: redis://redis:6379/1
+  # ---- AI ----
+  RSSANT_AI_ENABLE: ${AI_ENABLE:-1}
+  RSSANT_AI_API_KEY: ${AI_API_KEY:-}
+  RSSANT_AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
+  RSSANT_AI_MODEL: ${AI_MODEL:-deepseek-chat}
+  RSSANT_AI_TIMEOUT: ${AI_TIMEOUT:-30}
+  RSSANT_AI_BATCH_SIZE: ${AI_BATCH_SIZE:-20}
+  RSSANT_AI_DIGEST_HOUR: ${AI_DIGEST_HOUR:-8}
+  RSSANT_AI_DIGEST_MINUTE: ${AI_DIGEST_MINUTE:-10}
+  # ---- 初始用户 ----
+  RSSANT_SUPERUSER_USERNAME: ${RSSANT_SUPERUSER_USERNAME:-admin}
+  RSSANT_SUPERUSER_PASSWORD: ${RSSANT_SUPERUSER_PASSWORD:-admin123456}
+  RSSANT_SUPERUSER_EMAIL: ${RSSANT_SUPERUSER_EMAIL:-admin@example.com}
+
+services:
+  database:
+    image: postgres:13-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${RSSANT_PG_DB:-rssant}
+      POSTGRES_USER: ${RSSANT_PG_USER:-rssant}
+      POSTGRES_PASSWORD: ${RSSANT_PG_PASSWORD:-rssant}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # 2GB 内存下的保守配置
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=60
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_buffers=4MB
+      - -c
+      - min_wal_size=80MB
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - log_min_duration_statement=5000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RSSANT_PG_USER:-rssant} -d ${RSSANT_PG_DB:-rssant}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+    cpus: 1.0
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 纯 broker 用途: 关掉持久化, 限制内存
+    command: redis-server --maxmemory 96mb --maxmemory-policy allkeys-lru --appendonly no --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 128m
+    cpus: 0.25
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rssant-ai:latest
+    restart: unless-stopped
+    command: ["/app/docker/entrypoint.sh", "web"]
+    environment: *rssant-env
+    ports:
+      - "${RSSANT_WEB_PORT:-6789}:6789"
+    volumes:
+      - rssant-data:/app/data
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 448m
+    cpus: 1.0
+
+  worker:
+    image: rssant-ai:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["/app/docker/entrypoint.sh", "worker"]
+    environment: *rssant-env
+    volumes:
+      - rssant-data:/app/data
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    mem_limit: 576m
+    cpus: 1.0
+
+  beat:
+    image: rssant-ai:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["/app/docker/entrypoint.sh", "beat"]
+    environment: *rssant-env
+    volumes:
+      - rssant-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+    mem_limit: 160m
+    cpus: 0.5
+
+volumes:
+  pgdata:
+  rssant-data:

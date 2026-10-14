@@ -1,0 +1,362 @@
+"""业务逻辑层: 把 ai/ 的能力接到 rssant 的数据上。
+
+这一层是唯一同时依赖 Django ORM 和 ai/ 服务层的地方,
+Celery 任务与 HTTP 视图都只调用这里的函数, 便于复用与测试。
+"""
+
+import logging
+from datetime import timedelta
+from typing import Iterable, List, Optional
+
+from django.utils import timezone
+
+from ai import digest as ai_digest
+from ai import interest as ai_interest
+from ai.config import get_config
+from ai.errors import AIError
+from ai.prompts import DEFAULT_TOPIC, TOPICS
+from ai.summarizer import fallback_summary, summarize_story
+
+from rssant_api.models import STORY_SERVICE, Story
+
+from .models import AIStatus, DailyDigest, StoryAI, UserInterest
+
+LOG = logging.getLogger(__name__)
+
+# PROCESSING 状态停留超过这个时长, 认为是 worker 被 kill 导致的僵尸行
+STALE_PROCESSING_MINUTES = 15
+
+
+def is_ai_enabled() -> bool:
+    return get_config().is_enabled
+
+
+# ---------------------------------------------------------------------------
+# 文章 -> AI 摘要
+# ---------------------------------------------------------------------------
+def _load_story(story_id: int) -> Optional[Story]:
+    return Story.objects.filter(id=story_id).first()
+
+
+def _load_content(story: Story) -> str:
+    """文章内容存在独立的 volume 表, 需要走 storage 读取。"""
+    try:
+        common = STORY_SERVICE.get_by_offset(story.feed_id, story.offset, detail=True)
+    except Exception as ex:  # pragma: no cover - 防御性
+        LOG.warning('load story content failed story=%s: %s', story.id, ex)
+        return ''
+    return getattr(common, 'content', None) or ''
+
+
+def ensure_story_ai(story_ids: Iterable[int]) -> List[int]:
+    """为一批文章创建 AI 待办记录, 返回新建记录的 id 列表。"""
+    story_ids = [int(x) for x in story_ids if x]
+    if not story_ids:
+        return []
+    exists = set(
+        StoryAI.objects.filter(story_id__in=story_ids).values_list('story_id', flat=True)
+    )
+    new_ids = [x for x in story_ids if x not in exists]
+    if not new_ids:
+        return []
+    rows = [StoryAI(story_id=x, status=AIStatus.PENDING) for x in new_ids]
+    StoryAI.objects.bulk_create(rows, batch_size=100)
+    return list(
+        StoryAI.objects.filter(story_id__in=new_ids).values_list('id', flat=True)
+    )
+
+
+def on_new_stories(feed_id: int, storys: Iterable) -> dict:
+    """RSS 同步完成后的钩子。
+
+    只做两件很轻的事: 建待办记录 + 派发任务。
+    LLM 调用本身永远不在这个同步链路里执行。
+    """
+    config = get_config()
+    if not config.enable:
+        return {'created': 0, 'dispatched': 0}
+    storys = list(storys or [])
+    if not storys:
+        return {'created': 0, 'dispatched': 0}
+
+    offsets = [s.offset for s in storys]
+    pairs = dict(
+        Story.objects.filter(feed_id=feed_id, offset__in=offsets).values_list(
+            'offset', 'id'
+        )
+    )
+    story_ids = [pairs[o] for o in offsets if o in pairs]
+    if not story_ids:
+        return {'created': 0, 'dispatched': 0}
+
+    new_ai_ids = ensure_story_ai(story_ids)
+    # 低配保护: 单次同步最多派发 batch_size 个任务, 剩下的交给巡查任务
+    dispatched = 0
+    if config.is_enabled:
+        from .tasks import summarize_story_task
+
+        for ai_id in new_ai_ids[: config.batch_size]:
+            try:
+                summarize_story_task.delay(ai_id)
+                dispatched += 1
+            except Exception as ex:
+                LOG.warning('dispatch ai task failed ai_id=%s: %s', ai_id, ex)
+                break
+    return {'created': len(new_ai_ids), 'dispatched': dispatched}
+
+
+def process_story_ai(story_ai_id: int, force: bool = False) -> bool:
+    """处理一条 AI 待办: 调 LLM -> 写回数据库。返回是否成功。"""
+    config = get_config()
+    row = StoryAI.objects.filter(id=story_ai_id).first()
+    if row is None:
+        return False
+    if not force and row.status == AIStatus.DONE:
+        return True
+
+    story = _load_story(row.story_id)
+    if story is None:
+        row.status = AIStatus.SKIPPED
+        row.error = 'story not found'
+        row.save(update_fields=['status', 'error', 'dt_updated'])
+        return False
+
+    story_summary = getattr(story, 'summary', None) or ''
+    content = _load_content(story) if config.is_enabled else ''
+
+    # 先把状态置为处理中, 便于排查僵尸任务
+    StoryAI.objects.filter(id=row.id).update(status=AIStatus.PROCESSING)
+
+    try:
+        if not config.is_enabled:
+            # 没配 Key: 退化成规则分类 + RSS 原文摘要, 保证功能不残废
+            result = fallback_summary(
+                title=story.title, summary=story_summary, content=content
+            )
+            if result is None:
+                raise AIError('empty article, skip')
+            status = AIStatus.SKIPPED
+        else:
+            result = summarize_story(
+                title=story.title,
+                content=content,
+                summary=story_summary,
+                link=story.link,
+            )
+            status = AIStatus.DONE
+    except Exception as ex:  # noqa: BLE001 - 任务层不能因为单个异常整体崩溃
+        retry_count = row.retry_count + 1
+        final_status = (
+            AIStatus.SKIPPED
+            if retry_count > config.max_task_retries
+            else AIStatus.FAILED
+        )
+        StoryAI.objects.filter(id=row.id).update(
+            status=final_status,
+            retry_count=retry_count,
+            error=str(ex)[:500],
+            dt_updated=timezone.now(),
+        )
+        LOG.warning(
+            'ai summarize failed story=%s retry=%s status=%s: %s',
+            row.story_id, retry_count, final_status, ex,
+        )
+        return False
+
+    StoryAI.objects.filter(id=row.id).update(
+        ai_summary=result.summary,
+        ai_points=result.points,
+        ai_keywords=result.keywords,
+        topic=result.topic or DEFAULT_TOPIC,
+        ai_score=result.score,
+        status=status,
+        model=result.model,
+        error='',
+        dt_processed=timezone.now(),
+        dt_updated=timezone.now(),
+    )
+    return True
+
+
+def reset_stale_processing() -> int:
+    """把卡在 PROCESSING 的僵尸记录放回队列。"""
+    deadline = timezone.now() - timedelta(minutes=STALE_PROCESSING_MINUTES)
+    return StoryAI.objects.filter(
+        status=AIStatus.PROCESSING, dt_updated__lt=deadline
+    ).update(status=AIStatus.PENDING, dt_updated=timezone.now())
+
+
+def sweep_pending(limit: int = None) -> dict:
+    """巡查并处理待办/失败记录。带硬上限, 绝不会无界扩充。"""
+    config = get_config()
+    limit = limit or config.batch_size
+    reset_stale_processing()
+
+    queryset = (
+        StoryAI.objects.filter(
+            status__in=list(AIStatus.RETRYABLE),
+            retry_count__lte=config.max_task_retries,
+        )
+        .order_by('dt_created')
+        .values_list('id', flat=True)[:limit]
+    )
+    ai_ids = list(queryset)
+    ok = 0
+    failed = 0
+    for ai_id in ai_ids:
+        if process_story_ai(ai_id):
+            ok += 1
+        else:
+            failed += 1
+    if ai_ids:
+        LOG.info('ai sweep done total=%s ok=%s failed=%s', len(ai_ids), ok, failed)
+    return {'total': len(ai_ids), 'ok': ok, 'failed': failed}
+
+
+# ---------------------------------------------------------------------------
+# 每日 AI 简报
+# ---------------------------------------------------------------------------
+def _candidate_of(row: StoryAI) -> dict:
+    story = row.story
+    return {
+        'id': row.story_id,
+        'title': story.title,
+        'summary': row.ai_summary or story.summary or '',
+        'topic': row.topic,
+        'keywords': row.ai_keywords or [],
+        'ai_score': row.ai_score,
+    }
+
+
+def collect_recent_stories(hours: int = 24, limit: int = 30) -> List[StoryAI]:
+    since = timezone.now() - timedelta(hours=hours)
+    queryset = (
+        StoryAI.objects.filter(status=AIStatus.DONE, dt_created__gte=since)
+        .select_related('story')
+        .order_by('-ai_score', '-dt_created')[:limit]
+    )
+    return list(queryset)
+
+
+def build_daily_digest(
+    date=None, hours: int = 24, candidate_limit: int = 30, item_limit: int = 8
+) -> DailyDigest:
+    """生成(或覆盖)某一天的 AI 资讯简报。"""
+    config = get_config()
+    target_date = date or timezone.localdate()
+    rows = collect_recent_stories(hours=hours, limit=candidate_limit)
+    candidates = [_candidate_of(x) for x in rows]
+    link_map = {x.story_id: (x.story.link or '') for x in rows}
+
+    try:
+        if not candidates:
+            result = ai_digest.DailyDigestResult(
+                overview='今日暂无新增文章。', items=[], model='none'
+            )
+        elif not config.is_enabled:
+            # 没配 Key: 退化为按评分排序的规则简报
+            result = ai_digest.DailyDigestResult(
+                overview='未配置 AI，以下按文章评分自动生成。',
+                items=[
+                    ai_digest.DigestItem(
+                        story_id=x['id'],
+                        title=x['title'],
+                        digest=x['summary'][:120],
+                        reason=f"命中主题 {x['topic']}",
+                        score=x['ai_score'],
+                    )
+                    for x in candidates[:item_limit]
+                ],
+                model='fallback',
+            )
+        else:
+            result = ai_digest.build_daily_digest(candidates, limit=item_limit)
+    except Exception as ex:  # noqa: BLE001
+        LOG.error('build daily digest failed: %s', ex)
+        digest, _ = DailyDigest.objects.update_or_create(
+            date=target_date,
+            defaults={
+                'status': AIStatus.FAILED,
+                'error': str(ex)[:500],
+                'story_count': len(candidates),
+            },
+        )
+        return digest
+
+    markdown = ai_digest.render_markdown(target_date.isoformat(), result)
+
+    # 补上原文链接, 方便前端直接跳转
+    items = []
+    for item in result.items:
+        data = item.to_dict()
+        data['link'] = link_map.get(item.story_id, '')
+        items.append(data)
+
+    digest, _ = DailyDigest.objects.update_or_create(
+        date=target_date,
+        defaults={
+            'overview': result.overview,
+            'items': items,
+            'markdown': markdown,
+            'story_count': len(candidates),
+            'model': result.model,
+            'status': AIStatus.DONE,
+            'error': '',
+        },
+    )
+    LOG.info(
+        'daily digest %s built items=%s candidates=%s',
+        target_date, len(items), len(candidates),
+    )
+    return digest
+
+
+# ---------------------------------------------------------------------------
+# 用户兴趣
+# ---------------------------------------------------------------------------
+def get_interest(user) -> UserInterest:
+    row = UserInterest.objects.filter(user_id=user.id).first()
+    if row is None:
+        row, _ = UserInterest.objects.get_or_create(user_id=user.id)
+    return row
+
+
+def set_interest(
+    user,
+    keywords: str = None,
+    topics: list = None,
+    threshold: float = None,
+    enable: bool = None,
+) -> UserInterest:
+    row = get_interest(user)
+    if keywords is not None:
+        row.keywords = keywords.strip()
+    if topics is not None:
+        row.topics = [x for x in topics if x in TOPICS]
+    if threshold is not None:
+        row.threshold = float(threshold)
+    if enable is not None:
+        row.enable = bool(enable)
+    row.save()
+    return row
+
+
+def interest_match_score(interest: UserInterest, story_row: StoryAI) -> float:
+    """计算一篇文章与用户兴趣的匹配度。未启用兴趣过滤时恒为 0。"""
+    if interest is None or not interest.enable:
+        return 0.0
+    return ai_interest.match_score(
+        title=story_row.story.title if story_row.story else '',
+        summary=story_row.ai_summary or '',
+        keywords=story_row.ai_keywords or [],
+        interest_keywords=ai_interest.parse_keywords(interest.keywords),
+        interest_topics=interest.topics or [],
+        topic=story_row.topic,
+    )
+
+
+def cleanup_old_ai_data(days: int = 90) -> dict:
+    """清理过期的 AI 数据, 控制表体积(低配机器上很重要)。"""
+    deadline = timezone.now() - timedelta(days=days)
+    digest_deleted, _ = DailyDigest.objects.filter(date__lt=deadline.date()).delete()
+    return {'digest_deleted': digest_deleted}
