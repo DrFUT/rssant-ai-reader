@@ -12,7 +12,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.shortcuts import render
 
-from django_rest_validr import RestRouter
+from django_rest_validr import RestRouter, T
 from rest_framework.response import Response
 
 from ai import interest as ai_interest
@@ -195,7 +195,7 @@ def ai_stories(request):
 
 
 @AIView.get('ai/story/<int:story_id>')
-def ai_story_detail(request, story_id):
+def ai_story_detail(request, story_id: T.int):
     """单篇文章的 AI 结果。"""
     row = StoryAI.objects.filter(story_id=story_id).select_related('story').first()
     if row is None:
@@ -204,7 +204,7 @@ def ai_story_detail(request, story_id):
 
 
 @AIView.post('ai/story/<int:story_id>/refresh')
-def ai_story_refresh(request, story_id):
+def ai_story_refresh(request, story_id: T.int):
     """手动重新生成某篇文章的 AI 摘要(立即派发异步任务)。"""
     row = StoryAI.objects.filter(story_id=story_id).first()
     if row is None:
@@ -234,7 +234,7 @@ def ai_digest_latest(request):
 
 
 @AIView.get('ai/digest/<str:date>')
-def ai_digest_by_date(request, date):
+def ai_digest_by_date(request, date: T.str):
     digest = DailyDigest.objects.filter(date=date).first()
     if digest is None:
         return Response({'detail': 'not found'}, status=404)

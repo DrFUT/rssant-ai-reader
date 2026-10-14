@@ -216,12 +216,28 @@ docker compose logs -f beat             # 看定时调度
 docker compose exec web python manage.py migrate
 docker compose exec worker celery -A rssant_ai.celery inspect active   # 查看运行中的任务
 
-# 手动生成一次今日简报（同步执行，便于演示）
-curl -X POST -u admin:admin123456 \
-  -H 'Content-Type: application/json' \
-  -d '{"async":0}' \
-  http://localhost:6789/api/v1/ai/digest/generate
+# 容器内静态冒烟: 任务注册 / 低配参数 / AI 降级是否都正常
+docker compose exec -T web python docker/smoke_check.py
+
+# 端到端一键验收(只读, 不导入订阅不消耗额度)
+bash docker/verify.sh
 ```
+
+手动生成一次今日简报（同步执行，便于演示）：
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:6789/api/v1/auth/login/ \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123456"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')
+
+curl -s -X POST http://localhost:6789/api/v1/ai/digest/generate \
+  -H "Authorization: Token $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"async":0}' | python3 -m json.tool
+```
+
+完整的逐项验收步骤见 [docs/VERIFY.md](docs/VERIFY.md)。
 
 ---
 
@@ -285,7 +301,15 @@ AI_BASE_URL=https://api.moonshot.cn    AI_MODEL=moonshot-v1-8k
 示例：
 
 ```bash
-curl -u admin:admin123456 'http://localhost:6789/api/v1/ai/stories?topic=AI&sort=score&limit=5'
+# 先取 Token(也可以用浏览器的登录 Session)
+TOKEN=$(curl -s -X POST http://localhost:6789/api/v1/auth/login/ \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123456"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')
+
+curl -s -H "Authorization: Token $TOKEN" \
+  'http://localhost:6789/api/v1/ai/stories?topic=AI&sort=score&limit=5' \
+  | python3 -m json.tool
 ```
 
 ---

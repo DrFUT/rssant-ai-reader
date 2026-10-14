@@ -184,7 +184,7 @@ multidict==5.2.0
     # via
     #   aiohttp
     #   yarl
-netifaces==0.10.9
+netifaces==0.11.0
     # via -r requirements.in
 oauthlib==3.2.1
     # via requests-oauthlib
@@ -200,7 +200,7 @@ pycparser==2.21
     # via cffi
 pygments==2.11.1
     # via aiohttp-devtools
-pyinstrument-cext==0.2.2
+pyinstrument-cext==0.2.4
     # via
     #   -r requirements.in
     #   pyinstrument
@@ -220,7 +220,7 @@ pyparsing==3.0.6
     #   validr
 pysocks==1.7.1
     # via -r requirements.in
-python-dateutil==2.8.1
+python-dateutil==2.8.2
     # via
     #   -r requirements.in
     #   atoma
@@ -333,5 +333,5 @@ click-repl==0.3.0
 importlib-metadata==6.8.0
 kombu==5.3.5
 prompt-toolkit==3.0.39
-redis==4.6.0
+# redis==4.6.0 由 Dockerfile 单独安装(--no-deps), 原因见 Dockerfile 注释
 vine==5.1.0

@@ -23,6 +23,8 @@ x-rssant-env: &rssant-env
   RSSANT_LOG_LEVEL: ${RSSANT_LOG_LEVEL:-INFO}
   RSSANT_CHECK_FEED_MINUTES: ${RSSANT_CHECK_FEED_MINUTES:-30}
   RSSANT_NUM_THREADS: "20"
+  # 2GB 机器上把 RSS 并发抓取从默认 10 降到 4, 避免内存尖峰
+  RSSANT_SCHEDULER_NUM_WORKER: "4"
   # 上游的图片代理服务(asyncapi)本部署未启用, 图片直接走原站
   RSSANT_IMAGE_PROXY_ENABLE: "0"
   # ---- 数据库 ----
@@ -54,7 +56,11 @@ x-rssant-env: &rssant-env
 
 services:
   database:
-    image: postgres:13-alpine
+    # 用 Debian 变体而不是 alpine: 初始化脚本需要 CREATE EXTENSION hstore,
+    # 而 alpine 变体对部分 contrib 模块支持不全(见 docker-library/postgres#906)。
+    # 一旦 hstore 创建失败, 后续的 Site / 用户初始化会被中断。
+    # 两者运行时内存差异可以忽略。
+    image: postgres:13
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${RSSANT_PG_DB:-rssant}
