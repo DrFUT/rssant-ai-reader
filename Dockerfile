@@ -67,6 +67,12 @@ ENV PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=rssant.settings \
     TZ=Asia/Shanghai
 
+# 国内云机房访问 deb.debian.org / security.debian.org 很慢, 且 security
+# 仓库的元数据与包池经常不同步(404: libpq5_13.23-0+deb11u4)。
+# 切到阿里云镜像并强制 IPv4(云主机开启 IPv6 后 apt 优先走 v6 会黑洞超时)。
+RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g; s|http://security.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list \
+    && printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl libpq5 tzdata \
     && rm -rf /var/lib/apt/lists/*
