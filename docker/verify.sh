@@ -130,12 +130,19 @@ echo "== 7. 信息流接口 =="
 curl -s "${AUTH[@]}" "${BASE_URL}/api/v1/ai/stories?limit=2&sort=score" \
   | python3 -c '
 import sys, json
-d = json.load(sys.stdin)
-print(f"         total={d.get(\"total\")} 返回 {len(d.get(\"stories\", []))} 条")
-for s in d.get("stories", [])[:2]:
-    print(f"         - [{s.get(\"topic\")}] {s.get(\"ai_score\")}/10 {s.get(\"title\")[:36]}")
-    print(f"           摘要: {(s.get(\"ai_summary\") or \"\")[:50]}")
-' 2>/dev/null || bad "信息流接口调用失败"
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("         <非 JSON 响应>")
+    raise SystemExit(1)
+stories = d.get("stories") or []
+print("         total=%s 返回 %s 条" % (d.get("total"), len(stories)))
+for s in stories[:2]:
+    print("         - [%s] %s/10 %s" % (s.get("topic"), s.get("ai_score"), (s.get("title") or "")[:36]))
+    print("           摘要: %s" % ((s.get("ai_summary") or "")[:50]))
+if not stories:
+    print("         (暂无文章: 订阅刚导入, 等 worker 抓取完成后再看)")
+' || bad "信息流接口调用失败"
 
 if [ "$DO_DIGEST" = "1" ]; then
   echo "== 8. 生成每日简报(真实 API, 同步) =="
@@ -147,10 +154,12 @@ d = json.load(open("/tmp/_rssant_digest.json"))
 if "date" not in d:
     print("  [FAIL] 简报生成失败:", str(d)[:200]); raise SystemExit(0)
 items = d.get("items") or []
-print(f"  [PASS] {d[\"date\"]} 简报生成成功, 候选 {d.get(\"story_count\")} 篇, 入选 {len(items)} 条, 模型 {d.get(\"model\")}")
+print("  [PASS] %s 简报生成成功, 候选 %s 篇, 入选 %s 条, 模型 %s"
+      % (d["date"], d.get("story_count"), len(items), d.get("model")))
 print("         概览:", (d.get("overview") or "")[:70])
 for i, it in enumerate(items[:5], 1):
-    print(f"         {i}. {it.get(\"title\")[:38]} | {it.get(\"score\")}/10 | {it.get(\"reason\")}")
+    print("         %s. %s | %s/10 | %s"
+          % (i, (it.get("title") or "")[:38], it.get("score"), it.get("reason")))
 '
 else
   echo "== 8. 生成每日简报 =="

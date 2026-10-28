@@ -91,6 +91,17 @@ RUN mkdir -p /app/data /app/logs && chmod +x \
     /app/run-scheduler.py \
     /app/run-asyncapi.py
 
+# 换行符兜底: 这些脚本是被 shebang 直接执行的, 一旦是 CRLF,
+# 内核会把解释器解析成 "python\r", 报 /usr/bin/env: 'python\r': No such file。
+# .gitattributes 已声明 eol=lf, 但 Windows 工作区仍可能残留 CRLF,
+# 因此在镜像里再强制转一次(只影响这几个入口脚本, 成本可忽略)。
+RUN sed -i 's/\r$//' \
+    /app/docker/entrypoint.sh \
+    /app/manage.py \
+    /app/runserver.py \
+    /app/run-scheduler.py \
+    /app/run-asyncapi.py
+
 # 静态文件收集: 本项目的阅读器页面是内联资源, 不依赖 manifest,
 # 即使这里失败也不应该阻断镜像构建
 RUN python manage.py collectstatic --noinput || echo "[warn] collectstatic skipped"
