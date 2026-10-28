@@ -153,6 +153,25 @@ def fallback_summary(
         points=[],
         keywords=tags,
         topic=topic,
-        score=0,
+        score=_fallback_score(text),
         model='fallback',
     )
+
+
+def _fallback_score(text: str) -> int:
+    """降级模式下的"价值分"估算。
+
+    没有 LLM 时不能凭空编一个精确分值, 但全给 0 会让按分数排序/筛选
+    完全失效, 界面上也像是坏了。这里只用一个可解释的粗估:
+    正文字数越多, 通常信息密度越高。
+
+        < 200 字   -> 3
+        200~800 字 -> 5
+        > 800 字   -> 7
+    """
+    size = len(text)
+    if size > 800:
+        return 7
+    if size > 200:
+        return 5
+    return 3

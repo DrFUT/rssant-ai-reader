@@ -114,11 +114,11 @@ DONE_N=$("${PSQL[@]}" -tAc \
   "select count(*) from rssant_ai_storyai where status='done'" 2>/dev/null | tr -d ' ')
 SKIP_N=$("${PSQL[@]}" -tAc \
   "select count(*) from rssant_ai_storyai where status='skipped'" 2>/dev/null | tr -d ' ')
-# 判定口径: done = LLM 产出; skipped = 未配 Key 时的规则降级产出。
-# 两种都算"已产出结果", 只有一条都没有才是真失败。
+# 判定口径: done = 已产出结果(LLM 或 fallback 降级都算, 看 model 列区分);
+# skipped = 主动跳过(正文为空 / 文章不存在 / 超过重试上限)。
 RESULT_N=$(( ${DONE_N:-0} + ${SKIP_N:-0} ))
 if [ "${RESULT_N:-0}" -gt 0 ]; then
-  ok "AI 结果已写回 ${RESULT_N} 篇 (done=${DONE_N:-0}, 降级=${SKIP_N:-0})"
+  ok "AI 结果已写回 ${RESULT_N} 篇 (done=${DONE_N:-0}, 主动跳过=${SKIP_N:-0})"
 else
   bad "尚无任何 AI 结果(done=${DONE_N:-0}, skipped=${SKIP_N:-0})"
 fi

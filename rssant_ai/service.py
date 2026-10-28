@@ -132,13 +132,16 @@ def process_story_ai(story_ai_id: int, force: bool = False) -> bool:
 
     try:
         if not config.is_enabled:
-            # 没配 Key: 退化成规则分类 + RSS 原文摘要, 保证功能不残废
+            # 没配 Key: 退化成规则分类 + RSS 原文摘要, 保证功能不残废。
+            # 注意这里仍然标记为 DONE —— 记录本身是"处理完成"的,
+            # model=fallback 用来区分是否经过 LLM。若标记成 SKIPPED,
+            # 信息流接口(只查 DONE)在无 Key 时会是空的。
             result = fallback_summary(
                 title=story.title, summary=story_summary, content=content
             )
             if result is None:
                 raise AIError('empty article, skip')
-            status = AIStatus.SKIPPED
+            status = AIStatus.DONE
         else:
             result = summarize_story(
                 title=story.title,

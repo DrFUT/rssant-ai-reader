@@ -31,9 +31,9 @@ class AIStatus:
 
     pending    -> 排队中，等待 worker 处理
     processing -> 正在调用 LLM
-    done       -> 处理成功
+    done       -> 处理成功（含未配置 Key 时的规则降级，此时 model=fallback）
     failed     -> 调用失败(仍可重试)
-    skipped    -> 主动跳过(未配置 AI / 正文为空 / 达到重试上限)
+    skipped    -> 主动跳过(正文为空 / 文章不存在 / 达到重试上限)
     """
 
     PENDING = 'pending'

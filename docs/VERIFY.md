@@ -174,13 +174,13 @@ docker compose exec database psql -U rssant -d rssant -c \
 
 **通过标准**：能看到 `topic` 有值、`ai_summary` 非空的行。
 
-> 关于 `status` 的两种正常结果：
-> - `done` —— 真实调用了 LLM（`.env` 里配了 `AI_API_KEY`）
-> - `skipped` —— 没配 Key 时的**规则降级**结果，同样会写入 `topic` / `ai_summary` / `ai_score`，
->   `model` 列显示 `fallback`。这不是失败，只是没有 LLM 增强。
+> 关于 `status`：
+> - `done` —— 处理完成。`model` 列会告诉你走的是哪条路：
+>   `deepseek-chat` 表示真实调了 LLM，`fallback` 表示没配 Key 时的规则降级
+>   （同样写入 `topic` / `ai_summary` / `ai_keywords` / `ai_score`）
+> - `skipped` —— 主动跳过：正文为空、文章不存在、或超过重试上限
 >
-> 只有两者都为 0 才是真的没跑起来。一键脚本 `docker/verify.sh` 用的是
-> `done + skipped` 的合计口径。
+> 只有两者都为 0 才是真的没跑起来。一键脚本 `docker/verify.sh` 用合计口径。
 
 也可以走接口看：
 
