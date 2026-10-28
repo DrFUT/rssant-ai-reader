@@ -289,3 +289,24 @@ docker compose exec redis redis-cli info memory | grep used_memory_human
 - [ ] `/ai/` 页面能看到摘要与标签
 - [ ] 真实 API 生成一次简报成功
 - [ ] `docker stats` 内存在 1.2GB 以内
+
+---
+
+## 9. 真机部署实测踩到的坑（2026-10，Ubuntu 22.04 / 2C2G / 腾讯云）
+
+这一节是上面所有静态验证都发现不了、只有真跑才会暴露的问题，已全部修复。
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | `docker compose build` 在 apt 阶段 16 分钟后失败，`libpq5 ... 404 Not Found` | **Debian 11 (bullseye) LTS 已于 2026-08-31 结束**，各镜像正在下架 `bullseye-security` 包池：索引还在、包文件已移走，全网 404 | main/updates 走阿里云镜像；**security 改走 `archive.debian.org`** 并 `Acquire::Check-Valid-Until "false"`（归档库 Release 已过期） |
+| 2 | apt 卡住十几分钟无进展 | 云主机启用 IPv6 后 apt 优先走 v6，路由黑洞 | `Acquire::ForceIPv4 "true"` |
+| 3 | 构建最后一步 `image "rssant-ai:latest": already exists` | web/worker/beat 三个服务并行 build **同一个 tag**，互相抢占 | 只在 `web` 保留 `build:`，其余服务只写 `image:` 引用 |
+| 4 | `showmigrations rssant_ai` 显示 `(no migrations)`，三张表没建，但 `manage.py check` 全绿 | `rssant_ai/migrations/` **缺 `__init__.py`**，Django 不把它识别为迁移包，`migrate` 静默跳过 | 补上空的 `__init__.py` |
+| 5 | 用 `.env` 里的密码登录失败 | 上游 `django_run_db_init` 先创建 `admin`/**`admin`**，本项目 `django_ensure_user` 见用户已存在就跳过，`.env` 密码永不生效 | 仅在口令仍是上游默认值 `admin` 时才同步成 `.env` 值，用户自己改过的密码不会被覆盖 |
+| 6 | `celery-worker` 启动即 exit 2：`No such option: --queue` | Celery 5.3 的分发参数是 `-Q/--queues` | supervisord 里改成 `-Q ai` |
+| 7 | `rssant-worker` exit 127：`/usr/bin/env: 'python\r': No such file or directory` | `runserver.py` 等工作区文件是 **CRLF**，shebang 被解析成 `python\r` | `.gitattributes` 全仓归一化为 LF + Dockerfile 对入口脚本再 `sed 's/\r$//'` 兜底 |
+
+> 教训：`manage.py check`、离线 migration autodetector、容器内 import 冒烟这三样都**检查不出** #4/#6/#7 ——
+> 前者只校验模型/迁移一致性，后两者走的是 Python API 而不是真实的 `migrate` / `celery` CLI / shebang 执行路径。
+> 所以"能 import"不等于"能跑"，必须有一次真实 `up -d` + 真实抓取。
+
