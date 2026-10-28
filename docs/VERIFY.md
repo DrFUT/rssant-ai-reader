@@ -116,7 +116,7 @@ docker compose exec -T web python docker/smoke_check.py
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:6789/api/v1/auth/login/ \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123456"}' \
+  -d '{"username":"admin","password":"change-me-please"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')
 echo "TOKEN=$TOKEN"
 ```

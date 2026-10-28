@@ -1,3 +1,35 @@
+# ===========================================================================
+# 本项目(rssant-ai-reader)追加规则
+# 原则: 任何可能含密钥 / 用户数据 / 运行产物的东西都不进版本库
+# ===========================================================================
+
+# 环境与密钥: 只允许提交不含秘密的样例文件
+.env
+.env.*
+!.env.example
+
+# 本地数据库文件(PostgreSQL 数据在 docker volume 里, 但防止意外导出的文件入库)
+*.sqlite3
+*.sqlite
+*.db
+pgdata/
+dump*.sql
+
+# 运行时产物
+celerybeat-schedule
+celerybeat-schedule.*
+*.pid
+logs/
+*.log
+
+# 数据目录与构建产物(与 docker volume 对应)
+/data/
+/static/
+/staticfiles/
+/box/data/
+/box/logs/
+/box/web/
+
 .vscode/
 /data/
 /static/

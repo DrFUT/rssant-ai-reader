@@ -201,11 +201,11 @@ docker compose up -d
 
 | 地址 | 说明 |
 |---|---|
-| http://localhost:6789/ai/ | AI 信息流阅读器（默认账号 `admin` / `admin123456`） |
+| http://localhost:6789/ai/ | AI 信息流阅读器（默认账号 `admin` / `change-me-please`） |
 | http://localhost:6789/api/v1/ai/status | AI 运行状态与队列积压 |
 | http://localhost:6789/admin/ | Django Admin（可查看 AI 摘要表） |
 
-> 上面的 `admin123456` 只是 `.env.example` 里的示例默认值。**部署到公网前**请在 `.env` 里把它改掉
+> 上面的 `change-me-please` 只是 `.env.example` 里的示例默认值。**部署到公网前**请在 `.env` 里把它改掉
 > （`RSSANT_SUPERUSER_PASSWORD`），改完 `docker compose up -d` 生效。
 
 订阅几个 RSS 源后，等待 1～2 分钟（或手动触发一次同步），AI 摘要就会出现在信息流里。
@@ -241,7 +241,7 @@ bash docker/verify.sh
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:6789/api/v1/auth/login/ \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123456"}' \
+  -d '{"username":"admin","password":"change-me-please"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')
 
 curl -s -X POST http://localhost:6789/api/v1/ai/digest/generate \
@@ -288,7 +288,7 @@ AI_BASE_URL=https://api.moonshot.cn    AI_MODEL=moonshot-v1-8k
 | `RSSANT_WEB_PORT` | `6789` | 宿主机端口 |
 | `RSSANT_CHECK_FEED_MINUTES` | `30` | 订阅源检查间隔 |
 | `RSSANT_SUPERUSER_USERNAME` | `admin` | 首次启动自动创建的管理员 |
-| `RSSANT_SUPERUSER_PASSWORD` | `admin123456` | 同上 |
+| `RSSANT_SUPERUSER_PASSWORD` | `change-me-please` | 同上 |
 | `RSSANT_PG_DB/USER/PASSWORD` | `rssant` | 数据库 |
 
 完整列表见 `.env.example`。
@@ -317,7 +317,7 @@ AI_BASE_URL=https://api.moonshot.cn    AI_MODEL=moonshot-v1-8k
 # 先取 Token(也可以用浏览器的登录 Session)
 TOKEN=$(curl -s -X POST http://localhost:6789/api/v1/auth/login/ \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123456"}' \
+  -d '{"username":"admin","password":"change-me-please"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')
 
 curl -s -H "Authorization: Token $TOKEN" \
