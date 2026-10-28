@@ -27,7 +27,26 @@ def run():
     User = get_user_model()
     user = User.objects.filter(username=username).first()
     if user is not None:
-        LOG.info('user %r already exists, skip', username)
+        # 上游 django_run_db_init 会先建一个 admin/admin 的超级用户,
+        # 所以"用户已存在"几乎必然发生。若此时直接跳过, .env 里配置的
+        # 密码永远不会生效, 登录必然失败。
+        # 这里只在口令仍是上游默认值('admin')时才同步成 .env 的值 ——
+        # 用户自己改过密码的情形不会被覆盖。
+        if user.check_password(password):
+            LOG.info('user %r already exists, password matches env, skip', username)
+            return
+        if user.check_password('admin') and password != 'admin':
+            user.set_password(password)
+            user.is_staff = True
+            user.is_superuser = True
+            user.save(update_fields=['password', 'is_staff', 'is_superuser'])
+            LOG.info('user %r still used upstream default password, synced with .env', username)
+            return
+        LOG.warning(
+            'user %r exists with a different password, .env password NOT applied; '
+            'use the existing password or change it in admin',
+            username,
+        )
         return
     User.objects.create_superuser(username=username, email=email, password=password)
     LOG.info('created superuser %r, login at /ai/', username)
