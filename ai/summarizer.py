@@ -141,19 +141,28 @@ def fallback_summary(
 
     保证系统在没有 Key 的情况下依然可用(只是没有 AI 增强)。
     """
-    text = (summary or content or '').strip()
+    from .text import strip_html, truncate
+
+    summary_text = (summary or '').strip()
+    content_text = (content or '').strip()
+    # 展示用的摘要优先取 RSS 自带摘要(人写的, 更干净);
+    # 但价值分要看"信息量", 必须用两者中更长的正文来估 ——
+    # RSS summary 往往只有几十个字, 拿它打分会让所有文章都落进最低档。
+    text = summary_text or content_text
     if not text:
         return None
-    from .text import strip_html, truncate
 
     plain = truncate(strip_html(text), 120)
     topic, tags = classify(title=title, text=plain)
+    score_text = (
+        content_text if len(content_text) > len(summary_text) else summary_text
+    )
     return StorySummary(
         summary=plain,
         points=[],
         keywords=tags,
         topic=topic,
-        score=_fallback_score(text),
+        score=_fallback_score(strip_html(score_text)),
         model='fallback',
     )
 
