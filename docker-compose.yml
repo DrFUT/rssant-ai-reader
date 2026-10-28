@@ -150,6 +150,11 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
+    # 镜像里的 HEALTHCHECK 探的是 web 的 6789 端口, worker 不监听任何 HTTP,
+    # 继承下来只会 100% 失败, 让 ps 一直显示 unhealthy(看起来像坏了)。
+    # 真正的存活信号是 worker 容器内的 celery/scheduler 日志, 见 README。
+    healthcheck:
+      disable: true
     mem_limit: 576m
     cpus: 1.0
 
@@ -165,6 +170,9 @@ services:
         condition: service_healthy
       database:
         condition: service_healthy
+    # 同上: beat 只跑调度器, 不提供 HTTP 端点
+    healthcheck:
+      disable: true
     mem_limit: 160m
     cpus: 0.5
 
