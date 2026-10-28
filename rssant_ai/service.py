@@ -125,7 +125,11 @@ def process_story_ai(story_ai_id: int, force: bool = False) -> bool:
         return False
 
     story_summary = getattr(story, 'summary', None) or ''
-    content = _load_content(story) if config.is_enabled else ''
+    # 正文要给两条路径都用: LLM 路径要它做摘要, 降级路径要用它估算价值分。
+    # 之前只在 config.is_enabled 时才读, 结果降级模式下打分只能拿到 RSS
+    # 那几十个字的 summary, 全部文章都被打成最低分。
+    # 一次 get_by_offset 走的是本地 volume 表, 单条开销可以接受。
+    content = _load_content(story) or ''
 
     # 先把状态置为处理中, 便于排查僵尸任务
     StoryAI.objects.filter(id=row.id).update(status=AIStatus.PROCESSING)
