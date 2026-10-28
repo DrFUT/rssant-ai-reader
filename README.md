@@ -207,6 +207,16 @@ docker compose up -d
 
 订阅几个 RSS 源后，等待 1～2 分钟（或手动触发一次同步），AI 摘要就会出现在信息流里。
 
+> 云服务器上访问不到页面，通常不是应用问题，而是安全组/防火墙没放行 `6789`
+> （Docker 会自己写 iptables，云厂商的安全组在更外层）。腾讯云轻量需要单独加一条
+> TCP:6789 的防火墙规则。
+>
+> 如果订阅是在 AI 功能上线前就已经导入的，旧文章不会自动补 AI 记录，需要跑一次：
+>
+> ```bash
+> docker compose exec web python manage.py runscript ai_backfill
+> ```
+
 ### 4.4 常用命令
 
 ```bash
