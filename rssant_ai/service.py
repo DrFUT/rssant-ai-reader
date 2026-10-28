@@ -17,7 +17,9 @@ from ai.errors import AIError
 from ai.prompts import DEFAULT_TOPIC, TOPICS
 from ai.summarizer import fallback_summary, summarize_story
 
-from rssant_api.models import STORY_SERVICE, Story
+from rssant_api.models import STORY_SERVICE
+from rssant_api.models.story_info import StoryInfo
+from rssant_api.models.story_storage.common.story_key import StoryId
 
 from .models import AIStatus, DailyDigest, StoryAI, UserInterest
 
@@ -34,11 +36,11 @@ def is_ai_enabled() -> bool:
 # ---------------------------------------------------------------------------
 # 文章 -> AI 摘要
 # ---------------------------------------------------------------------------
-def _load_story(story_id: int) -> Optional[Story]:
-    return Story.objects.filter(id=story_id).first()
+def _load_story(story_id: int) -> Optional[StoryInfo]:
+    return StoryInfo.objects.filter(id=story_id).first()
 
 
-def _load_content(story: Story) -> str:
+def _load_content(story: StoryInfo) -> str:
     """文章内容存在独立的 volume 表, 需要走 storage 读取。"""
     try:
         common = STORY_SERVICE.get_by_offset(story.feed_id, story.offset, detail=True)
@@ -80,12 +82,13 @@ def on_new_stories(feed_id: int, storys: Iterable) -> dict:
         return {'created': 0, 'dispatched': 0}
 
     offsets = [s.offset for s in storys]
-    pairs = dict(
-        Story.objects.filter(feed_id=feed_id, offset__in=offsets).values_list(
-            'offset', 'id'
-        )
+    # StoryInfo 的主键就是 StoryId.encode(feed_id, offset), 没有独立的
+    # (feed_id, offset) 列可以 filter, 必须先算出候选主键再回查。
+    candidate_ids = [StoryId.encode(feed_id, o) for o in offsets]
+    existing_ids = set(
+        StoryInfo.objects.filter(id__in=candidate_ids).values_list('id', flat=True)
     )
-    story_ids = [pairs[o] for o in offsets if o in pairs]
+    story_ids = [i for i in candidate_ids if i in existing_ids]
     if not story_ids:
         return {'created': 0, 'dispatched': 0}
 

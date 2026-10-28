@@ -105,7 +105,7 @@ fi
 
 echo "== 6. 文章与 AI 摘要 =="
 STORY_N=$("${PSQL[@]}" -tAc \
-  'select count(*) from rssant_api_story' 2>/dev/null | tr -d ' ')
+  'select count(*) from rssant_api_storyinfo' 2>/dev/null | tr -d ' ')
 info "文章总数(story) = ${STORY_N}"
 if [ "${STORY_N:-0}" -gt 0 ]; then ok "文章已入库"; else bad "文章未入库, 请先导入订阅并等待抓取"; fi
 "${PSQL[@]}" -c \

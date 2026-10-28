@@ -64,6 +64,20 @@ def _user_feed_ids(user):
     )
 
 
+def _feed_ids_q(feed_ids):
+    """把「属于这些订阅」表达成 StoryAI.story_id 的主键区间。
+
+    StoryInfo 的主键就是 StoryId.encode(feed_id, offset)
+    = (feed_id << 32) + (offset << 4) + reserve，没有独立的 feed_id 列，
+    所以只能用主键区间过滤。好处是直接命中主键索引，不用 join 文章表。
+    """
+    q = Q()
+    for feed_id in feed_ids:
+        base = int(feed_id) << 32
+        q |= Q(story_id__gte=base, story_id__lt=base + (1 << 32))
+    return q or Q(pk__in=[])
+
+
 def _story_dict(row: StoryAI, interest: UserInterest = None, with_content: bool = False) -> dict:
     story = row.story
     data = {
@@ -157,8 +171,8 @@ def ai_stories(request):
     offset = _int_param(request, 'offset', 0, 0, 100000)
     limit = _int_param(request, 'limit', DEFAULT_LIMIT, 1, MAX_LIMIT)
 
-    queryset = StoryAI.objects.filter(
-        status=AIStatus.DONE, story__feed_id__in=feed_ids
+    queryset = StoryAI.objects.filter(status=AIStatus.DONE).filter(
+        _feed_ids_q(feed_ids)
     )
     if topic:
         queryset = queryset.filter(topic=topic)

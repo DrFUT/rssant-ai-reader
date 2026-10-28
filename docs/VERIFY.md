@@ -160,7 +160,7 @@ docker compose logs -f worker | grep -iE "sync_feed|find_feed|ai "
 
 ```bash
 # ① 文章是否入库
-docker compose exec database psql -U rssant -d rssant -c 'select count(*) from rssant_api_story;'
+docker compose exec database psql -U rssant -d rssant -c 'select count(*) from rssant_api_storyinfo;'
 
 # ② AI 待办是否建立
 docker compose exec database psql -U rssant -d rssant \

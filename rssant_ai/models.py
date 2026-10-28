@@ -1,12 +1,17 @@
 """rssant_ai 数据模型。
 
-刻意采用「独立的 AI 结果表」而不是往 Story 表上加字段，原因:
+刻意采用「独立的 AI 结果表」而不是往文章表上加字段，原因:
 
-    1. rssant 的 Story 查询大量使用 django-seal + 字段裁剪(defer)，
+    1. rssant 的文章查询大量使用 django-seal + 字段裁剪(defer)，
        往主表塞大字段会拖慢所有阅读接口的查询
     2. AI 结果有自己的生命周期(排队 -> 处理 -> 失败重试)，
        独立表可以单独加索引并限流，不影响订阅同步
     3. 对上游 rssant 的改动量最小 —— 只增加一个外键关联，不改主表结构
+
+关于关联目标: rssant 每篇文章真正落到 `rssant_api_storyinfo` 表
+(StoryInfo, 主键 id = StoryId.encode(feed_id, offset))，正文另存
+story_volume_* 卷表。`rssant_api_story`(Story) 是历史遗留表，实际为空，
+不能拿它做关联。
 """
 
 from django.conf import settings
@@ -14,7 +19,7 @@ from django.contrib.postgres.fields import JSONField
 from django.db import models
 from django.utils import timezone
 
-from rssant_api.models.story import Story
+from rssant_api.models.story_info import StoryInfo
 
 from ai.prompts import DEFAULT_TOPIC
 
@@ -64,7 +69,7 @@ class StoryAI(models.Model):
         display_fields = ['story_id', 'topic', 'ai_score', 'status']
 
     story = models.OneToOneField(
-        Story, on_delete=models.CASCADE, related_name='ai', help_text='关联文章'
+        StoryInfo, on_delete=models.CASCADE, related_name='ai', help_text='关联文章'
     )
     # 摘要
     ai_summary = models.TextField(blank=True, help_text='一句话总结')
