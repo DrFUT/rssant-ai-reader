@@ -135,10 +135,9 @@ services:
     cpus: 1.0
 
   worker:
+    # 与 web 共用同一个镜像, 这里只引用不重复 build ——
+    # 三个服务并行 build 会抢同一个 tag, 导致 "image already exists" 竞态
     image: rssant-ai:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["/app/docker/entrypoint.sh", "worker"]
     environment: *rssant-env
@@ -156,9 +155,6 @@ services:
 
   beat:
     image: rssant-ai:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["/app/docker/entrypoint.sh", "beat"]
     environment: *rssant-env
