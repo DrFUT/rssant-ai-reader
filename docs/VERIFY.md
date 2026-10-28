@@ -307,6 +307,7 @@ docker compose exec redis redis-cli info memory | grep used_memory_human
 | 7 | `rssant-worker` exit 127：`/usr/bin/env: 'python\r': No such file or directory` | `runserver.py` 等工作区文件是 **CRLF**，shebang 被解析成 `python\r` | `.gitattributes` 全仓归一化为 LF + Dockerfile 对入口脚本再 `sed 's/\r$//'` 兜底 |
 | 8 | 订阅导入成功、`rssant_api_storyinfo` 有 13 行，但 `rssant_ai_storyai` **一行都没有**，AI 链路完全没触发 | 上游有两套文章模型：真实文章在 `storyinfo`（主键 = `StoryId.encode(feed_id, offset)` 位运算编码），`rssant_api_story` 是**空的遗留表**；`StoryAI.story` 外键指错了对象，`on_new_stories` 回写的 id 在 `storyinfo` 里根本不存在 | 外键改指 `StoryInfo`，入队时用 `StoryId.encode()` 换算主键，列表接口按主键区间（`feed_id << 32`）过滤；补 `0002` 迁移 + `manage.py runscript ai_backfill` 给存量文章补记录 |
 | 9 | 没配 Key 时接口 `total=0`、页面空白；补上后又变成所有文章 `ai_score=3` | ①降级结果被写成 `skipped`，而信息流接口只查 `done`；②`service.py` 里正文只在 `config.is_enabled` 为真时才读，降级路径永远拿不到正文，只能拿几十字的 RSS summary 打分 | 降级也写 `done` 并用 `model=fallback` 区分；正文两条路径都加载；降级分数按正文长度粗估（<200→3 / 200~800→5 / >800→7） |
+| 10 | `docker compose ps` 里 `worker`、`beat` 一直 `unhealthy`，但应用其实工作正常 | 镜像里的 `HEALTHCHECK` 探的是 `127.0.0.1:6789`（web 的端口），worker/beat 不监听任何 HTTP，继承下来 100% 失败；容器内也没有 supervisor 的 9001 端点可用 | 在 compose 里对 `worker`、`beat` 显式 `healthcheck: disable: true` —— 非 HTTP 服务的存活信号应该看日志，而不是 HTTP 探针 |
 
 > 教训：`manage.py check`、离线 migration autodetector、容器内 import 冒烟这三样都**检查不出** #4/#6/#7 ——
 > 前者只校验模型/迁移一致性，后两者走的是 Python API 而不是真实的 `migrate` / `celery` CLI / shebang 执行路径。
