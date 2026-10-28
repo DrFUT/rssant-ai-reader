@@ -193,8 +193,12 @@ if ENV_CONFIG.root_url.startswith('https'):
 else:
     ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'http'
 LOGIN_REDIRECT_URL = '/ai/'
-# allauth 挂在 api/v1/accounts/ 下, 未登录访问 /ai/ 时跳转过去
-LOGIN_URL = '/api/v1/accounts/login/'
+# 未登录访问 /ai/ 时的跳转目标。
+# 不要指向 allauth 的 /api/v1/accounts/login/ —— 上游前端没有开源,
+# allauth 的 login.html 模板在本项目里并不存在, 走那条路会直接
+# TemplateDoesNotExist (500)。Django admin 自带登录页, 且支持 ?next=,
+# 登录后自动跳回 /ai/, 零新增模板。
+LOGIN_URL = '/admin/login/'
 AUTHENTICATION_BACKENDS = (
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',
