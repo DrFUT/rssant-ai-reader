@@ -205,6 +205,9 @@ docker compose up -d
 | http://localhost:6789/api/v1/ai/status | AI 运行状态与队列积压 |
 | http://localhost:6789/admin/ | Django Admin（可查看 AI 摘要表） |
 
+> 上面的 `admin123456` 只是 `.env.example` 里的示例默认值。**部署到公网前**请在 `.env` 里把它改掉
+> （`RSSANT_SUPERUSER_PASSWORD`），改完 `docker compose up -d` 生效。
+
 订阅几个 RSS 源后，等待 1～2 分钟（或手动触发一次同步），AI 摘要就会出现在信息流里。
 
 > 云服务器上访问不到页面，通常不是应用问题，而是安全组/防火墙没放行 `6789`
