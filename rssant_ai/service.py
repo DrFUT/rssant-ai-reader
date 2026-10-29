@@ -8,6 +8,7 @@ import logging
 from datetime import timedelta
 from typing import Iterable, List, Optional
 
+from django.db.models import Q
 from django.utils import timezone
 
 from ai import digest as ai_digest
@@ -108,6 +109,29 @@ def on_new_stories(feed_id: int, storys: Iterable) -> dict:
     return {'created': len(new_ai_ids), 'dispatched': dispatched}
 
 
+def claim_story_ai(story_ai_id: int, force: bool = False) -> bool:
+    """原子抢占一条待办，只有抢到的执行者才允许调用 LLM。
+
+    实现要点: 抢占由**单条带状态条件的 UPDATE** 完成 ——
+        UPDATE rssant_ai_storyai SET status='processing'
+        WHERE id = ? AND status IN ('pending', 'failed')
+    并发执行时数据库行锁保证只有一个执行者拿到 updated=1，其余拿到 0。
+
+    为什么不能用「先 SELECT 再判断 status != PROCESSING」:
+    两个 worker 可以同时读到 pending，两边都判断为"可以处理"，
+    于是同一篇文章被调用两次 LLM。只有把判定和改状态合成一条语句，
+    原子性才由数据库而不是应用代码来保证。
+    """
+    statuses = [AIStatus.PENDING, AIStatus.FAILED]
+    if force:
+        # 手动刷新场景允许重跑已经完成的文章
+        statuses.append(AIStatus.DONE)
+    updated = StoryAI.objects.filter(
+        id=story_ai_id, status__in=statuses
+    ).update(status=AIStatus.PROCESSING, dt_updated=timezone.now())
+    return updated == 1
+
+
 def process_story_ai(story_ai_id: int, force: bool = False) -> bool:
     """处理一条 AI 待办: 调 LLM -> 写回数据库。返回是否成功。"""
     config = get_config()
@@ -116,6 +140,14 @@ def process_story_ai(story_ai_id: int, force: bool = False) -> bool:
         return False
     if not force and row.status == AIStatus.DONE:
         return True
+
+    # 抢占失败说明: 别的执行者已经领走(processing)，或者状态已变成
+    # done/skipped。两种情况都不该再调模型，直接退出。
+    if not claim_story_ai(story_ai_id, force=force):
+        LOG.info(
+            'ai task not claimed ai_id=%s status=%s', story_ai_id, row.status,
+        )
+        return False
 
     story = _load_story(row.story_id)
     if story is None:
@@ -130,9 +162,6 @@ def process_story_ai(story_ai_id: int, force: bool = False) -> bool:
     # 那几十个字的 summary, 全部文章都被打成最低分。
     # 一次 get_by_offset 走的是本地 volume 表, 单条开销可以接受。
     content = _load_content(story) or ''
-
-    # 先把状态置为处理中, 便于排查僵尸任务
-    StoryAI.objects.filter(id=row.id).update(status=AIStatus.PROCESSING)
 
     try:
         if not config.is_enabled:
@@ -197,16 +226,28 @@ def reset_stale_processing() -> int:
 
 
 def sweep_pending(limit: int = None) -> dict:
-    """巡查并处理待办/失败记录。带硬上限, 绝不会无界扩充。"""
+    """巡查并处理待办/失败记录。带硬上限, 绝不会无界扩充。
+
+    选记录的规则刻意分成两类:
+        * failed  : 立刻重试(它已经失败过了, 不存在"正在处理"的可能)
+        * pending : 必须等过宽限期 grace 秒。因为这些记录很可能已经被
+          on_new_stories / refresh 派发进队列，只是还没轮到执行；
+          巡查再抓一遍就变成同一篇被两个执行者争抢。
+          (争抢本身由 claim_story_ai 挡住，但白跑一趟也是浪费。)
+    """
     config = get_config()
     limit = limit or config.batch_size
     reset_stale_processing()
 
+    grace_deadline = timezone.now() - timedelta(
+        seconds=max(0, config.sweep_pending_grace)
+    )
     queryset = (
         StoryAI.objects.filter(
-            status__in=list(AIStatus.RETRYABLE),
-            retry_count__lte=config.max_task_retries,
+            Q(status=AIStatus.FAILED)
+            | Q(status=AIStatus.PENDING, dt_updated__lt=grace_deadline)
         )
+        .filter(retry_count__lte=config.max_task_retries)
         .order_by('dt_created')
         .values_list('id', flat=True)[:limit]
     )

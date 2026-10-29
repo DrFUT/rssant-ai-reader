@@ -83,6 +83,9 @@ button:disabled { opacity: .5; cursor: default; }
   background: var(--panel2); color: var(--muted);
 }
 .tag.topic { background: rgba(79,140,255,.14); color: var(--accent); }
+/* 规则降级: 与"真实模型"用不同颜色, 避免把 fallback 当成 AI 结果 */
+.tag.fallback { background: rgba(245,158,11,.16); color: var(--warn); }
+.tag.model { background: rgba(34,197,94,.14); color: var(--accent2); }
 .score {
   font-size: 11px; padding: 2px 8px; border-radius: 6px;
   background: rgba(34,197,94,.14); color: var(--accent2);
@@ -285,13 +288,21 @@ async function loadTopics() {
 // ---------------- feed ----------------
 function renderStory(s) {
   const scoreCls = s.ai_score >= 8 ? 'hot' : (s.ai_score >= 5 ? '' : 'low');
+  // model 是区分「真实模型」与「规则降级」的唯一依据:
+  //   status=done 两种情况都是 done, 不能拿它判断。
+  //   历史记录可能没有 model 字段(接口已兜底成空串), 此时不加任何徽标。
+  const model = s.model || '';
+  const isFallback = model === 'fallback';
+  const modelBadge = isFallback
+    ? '<span class="tag fallback">规则降级</span>'
+    : (model ? '<span class="tag model">' + esc(model) + '</span>' : '');
   const tags = (s.ai_keywords || []).map(k => '<span class="tag">' + esc(k) + '</span>').join('');
   const points = (s.ai_points || []).length
     ? '<ul class="points">' + s.ai_points.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>'
     : '';
   const summary = s.ai_summary
     ? '<p class="summary">' + esc(s.ai_summary) + '</p>' +
-      (s.ai_status === 'done' ? '' : '<p class="pending">（此摘要为降级生成，AI 未配置）</p>')
+      (isFallback ? '<p class="pending">（规则降级结果：未配置 AI 或调用失败，非模型生成）</p>' : '')
     : '<p class="pending">AI 摘要生成中…（异步任务处理，无需等待）</p>';
   const interest = s.interest_score > 0
     ? ' <span class="tag">兴趣 ' + s.interest_score + '</span>' : '';
@@ -300,6 +311,7 @@ function renderStory(s) {
     '<div class="meta">' +
       '<span class="tag topic">' + esc(s.topic) + '</span>' +
       '<span class="score ' + scoreCls + '">AI ' + s.ai_score + '/10</span>' +
+      modelBadge +
       interest + tags +
       '<span class="hint">' + fmtDate(s.dt_created) + '</span>' +
     '</div>' + summary + points +

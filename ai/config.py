@@ -106,6 +106,11 @@ class AIConfig:
         self.batch_size: int = _env_int(
             'RSSANT_AI_BATCH_SIZE', 'AI_BATCH_SIZE', default=20
         )
+        # 巡查任务的宽限期: pending 记录在这么久之内被视为"可能已排在队列里",
+        # 巡查不重复处理，避免队列与巡查同时抢同一篇。
+        self.sweep_pending_grace: int = _env_int(
+            'RSSANT_AI_SWEEP_GRACE', 'AI_SWEEP_GRACE', default=120
+        )
         self.enable: bool = _env_bool('RSSANT_AI_ENABLE', 'AI_ENABLE', default=True)
 
     @property

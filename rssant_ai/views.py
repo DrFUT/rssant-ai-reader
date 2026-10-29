@@ -11,6 +11,7 @@ import logging
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.shortcuts import render
+from django.utils import timezone
 
 from django_rest_validr import RestRouter, T
 from rest_framework.response import Response
@@ -96,6 +97,12 @@ def _story_dict(row: StoryAI, interest: UserInterest = None, with_content: bool 
         'topic': row.topic,
         'ai_score': row.ai_score,
         'ai_status': row.status,
+        # 让前端能区分「真实 LLM 生成」和「规则降级」。
+        # status=done 同时表示两种情况，只有 model 能区分：
+        #   model='fallback'  → 未配置 Key / 调用失败时的规则结果
+        #   model='deepseek-chat' 等 → 真实模型
+        # 只暴露模型名，不含任何密钥或请求头。
+        'model': row.model or '',
         'dt_processed': row.dt_processed,
     }
     if interest is not None and interest.enable:
@@ -228,9 +235,25 @@ def ai_story_refresh(request, story_id: T.int):
         if not new_ids:
             return Response({'detail': 'not found'}, status=404)
         row = StoryAI.objects.get(id=new_ids[0])
-    StoryAI.objects.filter(id=row.id).update(
-        status=AIStatus.PENDING, retry_count=0, error=''
+    # 正在处理的行不能被强行改回 pending: 否则原任务写回结果的同时
+    # 新任务又抢到一次执行机会, 等于同一篇调用两次模型。
+    # 这里用带条件的 UPDATE, 由数据库决定谁能改。
+    updated = (
+        StoryAI.objects.filter(id=row.id)
+        .exclude(status=AIStatus.PROCESSING)
+        .update(
+            status=AIStatus.PENDING,
+            retry_count=0,
+            error='',
+            dt_updated=timezone.now(),
+        )
     )
+    if not updated:
+        return Response(
+            {'ok': False, 'detail': 'processing', 'ai_id': row.id,
+             'message': '该文章正在处理中，请稍后再试'},
+            status=409,
+        )
     _dispatch_summarize(row.id)
     return Response({'ok': True, 'ai_id': row.id, 'status': AIStatus.PENDING})
 
@@ -310,9 +333,19 @@ def ai_interest_set(request):
 def ai_topics(request):
     """各主题的文章数量, 前端用于筛选器。"""
     feed_ids = _user_feed_ids(request.user)
-    queryset = StoryAI.objects.filter(status=AIStatus.DONE)
-    if feed_ids:
-        queryset = queryset.filter(story__feed_id__in=feed_ids)
+    if not feed_ids:
+        # 没有订阅时不返回任何计数。旧实现会退化成"全库统计"，
+        # 等于把别人的数据量暴露给当前用户。
+        return Response(
+            {'topics': [{'topic': t, 'count': 0} for t in TOPICS]}
+        )
+    # 注意: StoryInfo 的 feed_id 是 Python property(StoryId.decode 出来),
+    # 数据库里没有这一列, 不能写 story__feed_id__in —— 那会抛
+    # FieldError: Related Field got invalid lookup: feed_id。
+    # 必须沿用和 ai_stories 相同的主键区间过滤。
+    queryset = StoryAI.objects.filter(status=AIStatus.DONE).filter(
+        _feed_ids_q(feed_ids)
+    )
     counts = {x['topic']: x['count'] for x in queryset.values('topic').annotate(count=Count('id'))}
     return Response(
         {'topics': [{'topic': t, 'count': counts.get(t, 0)} for t in TOPICS]}
