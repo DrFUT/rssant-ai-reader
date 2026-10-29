@@ -84,6 +84,11 @@ class ClaimTestCase(TransactionTestCase):
     # 顺序重复处理
     # ------------------------------------------------------------------
     def test_second_process_call_does_not_hit_model(self):
+        """第二次调用必须返回 False, 且不再碰模型。
+
+        这里的 False 表示"本次调用没有执行处理"(记录已被上一次调用处理完),
+        而不是"处理失败" —— service.process_story_ai 的返回值就是这个语义。
+        """
         row = make_story_ai(self.story, status=AIStatus.PENDING)
         counter = _Counter()
         with mock.patch.object(service, 'get_config', return_value=_FakeConfig()), \

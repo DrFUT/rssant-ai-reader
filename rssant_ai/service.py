@@ -133,14 +133,30 @@ def claim_story_ai(story_ai_id: int, force: bool = False) -> bool:
 
 
 def process_story_ai(story_ai_id: int, force: bool = False) -> bool:
-    """处理一条 AI 待办: 调 LLM -> 写回数据库。返回是否成功。"""
+    """处理一条 AI 待办: 调 LLM -> 写回数据库。
+
+    返回值含义固定为"**本次调用**是否真的执行了处理":
+        True  -> 本进程抢到了这一行，并且走完了处理(含降级)流程
+        False -> 这一行不存在 / 已被别的执行者领走 / 已经处理完了
+
+    这个区分很重要: sweep / 任务层都拿它统计 ok 与 failed, 如果
+    "别人已经做完"也返回 True, 统计就永远看不出真实的争抢。
+    """
     config = get_config()
     row = StoryAI.objects.filter(id=story_ai_id).first()
     if row is None:
         return False
-    if not force and row.status == AIStatus.DONE:
-        return True
 
+    # 所有"要不要干活"的判断都必须落到下面这一条带条件的 UPDATE 上。
+    # 这里曾经有一个 `if not force and row.status == AIStatus.DONE: return True`
+    # 的捷径, 它有两个问题:
+    #   1. 本质是"先读状态再判断", 多进程下读完 DONE 之后状态仍可能被改,
+    #      与原子抢占是两套判定, 后来者只要改坏一处就会退化成重复执行
+    #   2. 让返回值变含糊(见上面的 docstring), 调用方无法区分
+    #      "我处理了" 和 "别人已经处理完了"
+    # 2 核 2GB 上跑单并发 worker 时这个问题被掩盖了, 只有在真正的并发
+    # 回归里才会暴露 —— 所以这里不留任何 Python 层的状态捷径。
+    #
     # 抢占失败说明: 别的执行者已经领走(processing)，或者状态已变成
     # done/skipped。两种情况都不该再调模型，直接退出。
     if not claim_story_ai(story_ai_id, force=force):
